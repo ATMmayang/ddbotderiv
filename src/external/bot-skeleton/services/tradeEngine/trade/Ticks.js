@@ -1,5 +1,4 @@
 /* eslint-disable no-promise-executor-return */
-import debounce from 'lodash.debounce';
 import { getLocalizedErrorMessage } from '@/constants/backend-error-messages';
 import { localize } from '@deriv-com/translations';
 import { getLast } from '../../../utils/binary-utils';
@@ -8,6 +7,15 @@ import { api_base } from '../../api/api-base';
 import { getDirection, getLastDigit } from '../utils/helpers';
 import { expectPositiveInteger } from '../utils/sanitize';
 import * as constants from './state/constants';
+
+// Simple debounce implementation to replace lodash.debounce
+const debounce = (func, delay) => {
+    let timeoutId;
+    return function (...args) {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => func.apply(this, args), delay);
+    };
+};
 
 let tickListenerKey;
 
