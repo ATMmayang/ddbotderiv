@@ -1,5 +1,4 @@
 /* eslint-disable no-confusing-arrow */
-import { Map } from 'immutable';
 import { getLast, historyToTicks } from '../../utils/binary-utils';
 import { observer as globalObserver } from '../../utils/observer';
 import { doUntilDone, getUUID } from '../tradeEngine/utils/helpers';
@@ -40,13 +39,47 @@ const updateCandles = (candles, ohlc) => {
 
 const getType = isCandle => (isCandle ? 'candles' : 'ticks');
 
+// Helper functions to replace immutable.Map nested operations
+const getNestedValue = (obj, keys) => {
+    let current = obj;
+    for (const key of keys) {
+        if (current === undefined || current === null) return undefined;
+        current = current[key];
+    }
+    return current;
+};
+
+const setNestedValue = (obj, keys, value) => {
+    const newObj = JSON.parse(JSON.stringify(obj));
+    let current = newObj;
+    for (let i = 0; i < keys.length - 1; i++) {
+        if (current[keys[i]] === undefined) {
+            current[keys[i]] = {};
+        }
+        current = current[keys[i]];
+    }
+    current[keys[keys.length - 1]] = value;
+    return newObj;
+};
+
+const deleteNestedValue = (obj, keys) => {
+    const newObj = JSON.parse(JSON.stringify(obj));
+    let current = newObj;
+    for (let i = 0; i < keys.length - 1; i++) {
+        if (current[keys[i]] === undefined) return newObj;
+        current = current[keys[i]];
+    }
+    delete current[keys[keys.length - 1]];
+    return newObj;
+};
+
 export default class TicksService {
     constructor() {
-        this.ticks = new Map();
-        this.candles = new Map();
-        this.tickListeners = new Map();
-        this.ohlcListeners = new Map();
-        this.subscriptions = new Map();
+        this.ticks = {};
+        this.candles = {};
+        this.tickListeners = {};
+        this.ohlcListeners = {};
+        this.subscriptions = {};
         this.ticks_history_promise = null;
         this.active_symbols_promise = null;
         this.candles_promise = null;
@@ -74,12 +107,12 @@ export default class TicksService {
 
             const style = getType(granularity);
 
-            if (style === 'ticks' && this.ticks.has(symbol)) {
-                resolve(this.ticks.get(symbol));
+            if (style === 'ticks' && symbol in this.ticks) {
+                resolve(this.ticks[symbol]);
             }
 
-            if (style === 'candles' && this.candles.hasIn([symbol, Number(granularity)])) {
-                resolve(this.candles.getIn([symbol, Number(granularity)]));
+            if (style === 'candles' && getNestedValue(this.candles, [symbol, Number(granularity)]) !== undefined) {
+                resolve(getNestedValue(this.candles, [symbol, Number(granularity)]));
             }
             this.requestStream({ ...options, style })
                 .then(res => {
@@ -101,11 +134,11 @@ export default class TicksService {
             this.request(options)
                 .then(() => {
                     if (type === 'ticks') {
-                        this.tickListeners = this.tickListeners.setIn([symbol, key], callback);
+                        this.tickListeners = setNestedValue(this.tickListeners, [symbol, key], callback);
                         globalObserver.emit('bot.bot_ready');
                         api_base.toggleRunButton(false);
                     } else {
-                        this.ohlcListeners = this.ohlcListeners.setIn([symbol, Number(granularity), key], callback);
+                        this.ohlcListeners = setNestedValue(this.ohlcListeners, [symbol, Number(granularity), key], callback);
                     }
                     resolve(key);
                 })
@@ -122,12 +155,12 @@ export default class TicksService {
         const { symbol, granularity, key } = options;
         const type = getType(granularity);
 
-        if (type === 'ticks' && this.tickListeners.hasIn([symbol, key])) {
-            this.tickListeners = this.tickListeners.deleteIn([symbol, key]);
+        if (type === 'ticks' && getNestedValue(this.tickListeners, [symbol, key]) !== undefined) {
+            this.tickListeners = deleteNestedValue(this.tickListeners, [symbol, key]);
         }
 
-        if (type === 'candles' && this.ohlcListeners.hasIn([symbol, Number(granularity), key])) {
-            this.ohlcListeners = this.ohlcListeners.deleteIn([symbol, Number(granularity), key]);
+        if (type === 'candles' && getNestedValue(this.ohlcListeners, [symbol, Number(granularity), key]) !== undefined) {
+            this.ohlcListeners = deleteNestedValue(this.ohlcListeners, [symbol, Number(granularity), key]);
         }
 
         await this.unsubscribeIfEmptyListeners(options);
@@ -138,19 +171,19 @@ export default class TicksService {
 
         let needToUnsubscribe = false;
 
-        const tickListener = this.tickListeners.get(symbol);
+        const tickListener = this.tickListeners[symbol];
 
-        if (tickListener && !tickListener.size) {
-            this.tickListeners = this.tickListeners.delete(symbol);
-            this.ticks = this.ticks.delete(symbol);
+        if (tickListener && Object.keys(tickListener).length === 0) {
+            this.tickListeners = deleteNestedValue(this.tickListeners, [symbol]);
+            this.ticks = deleteNestedValue(this.ticks, [symbol]);
             needToUnsubscribe = true;
         }
 
-        const ohlcListener = this.ohlcListeners.getIn([symbol, Number(granularity)]);
+        const ohlcListener = getNestedValue(this.ohlcListeners, [symbol, Number(granularity)]);
 
-        if (ohlcListener && !ohlcListener.size) {
-            this.ohlcListeners = this.ohlcListeners.deleteIn([symbol, Number(granularity)]);
-            this.candles = this.candles.deleteIn([symbol, Number(granularity)]);
+        if (ohlcListener && Object.keys(ohlcListener).length === 0) {
+            this.ohlcListeners = deleteNestedValue(this.ohlcListeners, [symbol, Number(granularity)]);
+            this.candles = deleteNestedValue(this.candles, [symbol, Number(granularity)]);
             needToUnsubscribe = true;
         }
 
@@ -160,38 +193,38 @@ export default class TicksService {
     }
 
     unsubscribeAllAndSubscribeListeners(symbol) {
-        const ohlcSubscriptions = this.subscriptions.getIn(['ohlc', symbol]);
+        const ohlcSubscriptions = getNestedValue(this.subscriptions, ['ohlc', symbol]);
 
-        const subscription = [...(ohlcSubscriptions ? Array.from(ohlcSubscriptions.values()) : [])];
+        const subscription = [...(ohlcSubscriptions ? Object.values(ohlcSubscriptions) : [])];
 
         Promise.all(subscription.map(id => doUntilDone(() => api_base.api.forget(id))));
 
-        this.subscriptions = new Map();
+        this.subscriptions = {};
     }
 
     updateTicksAndCallListeners(symbol, ticks) {
-        if (this.ticks.get(symbol) === ticks) {
+        if (this.ticks[symbol] === ticks) {
             return;
         }
-        this.ticks = this.ticks.set(symbol, ticks);
+        this.ticks[symbol] = ticks;
 
-        const listeners = this.tickListeners.get(symbol);
+        const listeners = this.tickListeners[symbol];
 
         if (listeners) {
-            listeners.forEach(callback => callback(this.ticks.get(symbol)));
+            Object.values(listeners).forEach(callback => callback(this.ticks[symbol]));
         }
     }
 
     updateCandlesAndCallListeners(address, candles) {
-        if (this.ticks.getIn(address) === candles) {
+        if (getNestedValue(this.ticks, address) === candles) {
             return;
         }
-        this.candles = this.candles.setIn(address, candles);
+        this.candles = setNestedValue(this.candles, address, candles);
 
-        const listeners = this.ohlcListeners.getIn(address);
+        const listeners = getNestedValue(this.ohlcListeners, address);
 
         if (listeners) {
-            listeners.forEach(callback => callback(this.candles.getIn(address)));
+            Object.values(listeners).forEach(callback => callback(getNestedValue(this.candles, address)));
         }
     }
 
@@ -201,21 +234,21 @@ export default class TicksService {
                 if (data.msg_type === 'tick') {
                     const { tick } = data;
                     const { symbol, id } = tick;
-                    if (this.ticks.has(symbol)) {
-                        this.subscriptions = this.subscriptions.setIn(['tick', symbol], id);
-                        this.updateTicksAndCallListeners(symbol, updateTicks(this.ticks.get(symbol), parseTick(tick)));
+                    if (symbol in this.ticks) {
+                        this.subscriptions = setNestedValue(this.subscriptions, ['tick', symbol], id);
+                        this.updateTicksAndCallListeners(symbol, updateTicks(this.ticks[symbol], parseTick(tick)));
                     }
                 }
 
                 if (data.msg_type === 'ohlc') {
                     const { ohlc } = data;
                     const { symbol, granularity, id } = ohlc;
-                    if (this.candles.hasIn([symbol, Number(granularity)])) {
-                        this.subscriptions = this.subscriptions.setIn(['ohlc', symbol, Number(granularity)], id);
+                    if (getNestedValue(this.candles, [symbol, Number(granularity)]) !== undefined) {
+                        this.subscriptions = setNestedValue(this.subscriptions, ['ohlc', symbol, Number(granularity)], id);
                         const address = [symbol, Number(granularity)];
                         this.updateCandlesAndCallListeners(
                             address,
-                            updateCandles(this.candles.getIn(address), parseOhlc(ohlc))
+                            updateCandles(getNestedValue(this.candles, address), parseOhlc(ohlc))
                         );
                     }
                 }
@@ -286,10 +319,10 @@ export default class TicksService {
                     // Handle AlreadySubscribed errors gracefully - they're not fatal
                     if (error?.error?.code === 'AlreadySubscribed') {
                         // For AlreadySubscribed errors, we can still resolve with existing data
-                        if (style === 'ticks' && this.ticks.has(symbol)) {
-                            resolve(this.ticks.get(symbol));
-                        } else if (style === 'candles' && this.candles.hasIn([symbol, Number(granularity)])) {
-                            resolve(this.candles.getIn([symbol, Number(granularity)]));
+                        if (style === 'ticks' && symbol in this.ticks) {
+                            resolve(this.ticks[symbol]);
+                        } else if (style === 'candles' && getNestedValue(this.candles, [symbol, Number(granularity)]) !== undefined) {
+                            resolve(getNestedValue(this.candles, [symbol, Number(granularity)]));
                         } else {
                             resolve([]);
                         }
