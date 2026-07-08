@@ -1,4 +1,3 @@
-import { List, Map } from 'immutable';
 /**
 Below are the list of events we can register to listen to :
  
@@ -41,7 +40,7 @@ latest values for contract, not required atm by DerivBot
 
 export default class Observer {
     constructor() {
-        this.eam = new Map(); // event action map
+        this.eam = {}; // event action map
     }
 
     register(event, _action, once, unregisterIfError, unregisterAllBefore) {
@@ -73,31 +72,32 @@ export default class Observer {
             _action(...args);
         };
 
-        const actionList = this.eam.get(event);
+        const actionList = this.eam[event];
 
-        this.eam = actionList
-            ? this.eam.set(event, actionList.push({ action, searchBy: _action }))
-            : this.eam.set(event, new List().push({ action, searchBy: _action }));
+        if (actionList) {
+            actionList.push({ action, searchBy: _action });
+        } else {
+            this.eam[event] = [{ action, searchBy: _action }];
+        }
     }
 
     unregister(event, f) {
-        this.eam = this.eam.set(
-            event,
-            this.eam.get(event).filter(r => r.searchBy !== f)
-        );
+        if (this.eam[event]) {
+            this.eam[event] = this.eam[event].filter(r => r.searchBy !== f);
+        }
     }
 
     isRegistered(event) {
-        return this.eam.has(event);
+        return event in this.eam;
     }
 
     unregisterAll(event) {
-        this.eam = this.eam.delete(event);
+        delete this.eam[event];
     }
 
     emit(event, data) {
-        if (this.eam.has(event)) {
-            this.eam.get(event).forEach(action => action.action(data));
+        if (event in this.eam) {
+            this.eam[event].forEach(action => action.action(data));
         }
     }
     setState(state = {}) {
