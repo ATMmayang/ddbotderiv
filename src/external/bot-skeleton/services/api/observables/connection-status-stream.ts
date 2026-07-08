@@ -1,5 +1,4 @@
-// connection-status-stream.ts (This will manage our observable stream)
-import { BehaviorSubject } from 'rxjs';
+// connection-status-stream.ts (Observable-like stream without rxjs dependency)
 import { TAuthData } from '@/types/api-types';
 
 export enum CONNECTION_STATUS {
@@ -8,12 +7,41 @@ export enum CONNECTION_STATUS {
     UNKNOWN = 'unknown',
 }
 
+// Simple Subject-like implementation without rxjs
+class SimpleSubject<T> {
+    private value: T;
+    private subscribers: Set<(value: T) => void> = new Set();
+
+    constructor(initialValue: T) {
+        this.value = initialValue;
+    }
+
+    next(value: T) {
+        this.value = value;
+        this.subscribers.forEach(subscriber => subscriber(value));
+    }
+
+    getValue() {
+        return this.value;
+    }
+
+    subscribe(observer: (value: T) => void) {
+        this.subscribers.add(observer);
+        // Call immediately with current value
+        observer(this.value);
+        // Return unsubscribe function
+        return () => {
+            this.subscribers.delete(observer);
+        };
+    }
+}
+
 // Initial connection status will be 'unknown'
-export const connectionStatus$ = new BehaviorSubject<string>('unknown');
-export const isAuthorizing$ = new BehaviorSubject<boolean>(true); // Start with true to show loader immediately
-export const isAuthorized$ = new BehaviorSubject<boolean>(false);
-export const account_list$ = new BehaviorSubject<TAuthData['account_list']>([]);
-export const authData$ = new BehaviorSubject<TAuthData | null>(null);
+export const connectionStatus$ = new SimpleSubject<string>('unknown');
+export const isAuthorizing$ = new SimpleSubject<boolean>(true); // Start with true to show loader immediately
+export const isAuthorized$ = new SimpleSubject<boolean>(false);
+export const account_list$ = new SimpleSubject<TAuthData['account_list']>([]);
+export const authData$ = new SimpleSubject<TAuthData | null>(null);
 
 // Create functions to easily update status
 export const setConnectionStatus = (status: CONNECTION_STATUS) => {
